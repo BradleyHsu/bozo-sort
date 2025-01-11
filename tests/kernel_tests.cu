@@ -105,7 +105,7 @@ bool test_bogo_sort() {
         }
     }
     // Print expected array
-    printf("Expected array: ");
+    printf("Expected sdfdfds array: ");
     for (int i = 0; i < N; i++) {
         printf("%d ", expected[i]);
     }
@@ -122,12 +122,15 @@ bool test_bogo_sort() {
 
     // Run kernel
     KernelManagerBogoSort::launchKernel(d_input, d_output);
+    cudaError_t err = cudaGetLastError();        // Get error code
+
+    printf("CUDA Error: %s\n", cudaGetErrorString(err));
 
     // Copy result back to host
     cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost);
 
     // Print output array
-    printf("Output array: ");
+    printf("sdfdOutput array: ");
     for (int i = 0; i < N; i++) {
         printf("%d ", h_output[i]); 
     }
@@ -239,12 +242,29 @@ bool test_bogo_sort_matv1_3_symbol() {
     int *h_output = new int[N];
 
     int num_zeroes = 16;
+    int num_twos = 1;
     
     // Initialize input array
+    // First fill with zeroes
     for (int i = 0; i < 32; i++) {
-        h_input[i] = i % 2;  // Alternates between 0 and 1
+        h_input[i] = 0;
         h_output[i] = 0;
     }
+
+    // Randomly scatter num_zeroes 1's throughout
+    int ones_placed = 0;
+    while (ones_placed + num_twos < num_zeroes) {
+        int pos = rand() % 32 - num_twos;
+        if (h_input[pos] == 0) {
+            h_input[pos] = 1;
+            ones_placed++;
+        }
+    }
+
+    for (int i = N - num_twos; i < N; i++) {
+        h_input[i] = 2;
+    }
+
     // Print input array
     printf("Input array: ");
     for (int i = 0; i < N; i++) {
@@ -259,6 +279,11 @@ bool test_bogo_sort_matv1_3_symbol() {
         
         expected[i] = (i < 32 - num_zeroes) ? 0 : 1;
     }
+
+    for (int i = N - num_twos; i < N; i++) {
+        expected[i] = 2;
+    }
+
     // Print expected array
     printf("Expected array: ");
     for (int i = 0; i < N; i++) {
@@ -277,6 +302,9 @@ bool test_bogo_sort_matv1_3_symbol() {
 
     // Run kernel
     KernelManagerBogoSortMatV1::launchKernel(d_input, d_output);
+
+    cudaError_t err = cudaGetLastError();        // Get error code
+    printf("CUDA Error: %s\n", cudaGetErrorString(err));
 
     // Copy result back to host
     cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost);

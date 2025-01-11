@@ -9,9 +9,9 @@
 #include <cuda_fp8.h>
 
 // #define DEBUG_PERMUTE
-#define DEBUG_PRINT 
+// #define DEBUG_PRINT 
 // #define DEBUG_SORT
-#define DEBUG_RANDOM
+// #define DEBUG_RANDOM
 #define PERMUTE_MATRIX_WIDTH 16
 #define PERMUTATION_LENGTH 32
 #define PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024 1024
@@ -23,31 +23,33 @@
 #define INNER_DIM 16
 #define OUTER_HEIGHT 16
 
-#define TOTAL_PERMUTATIONS 100
+// #define TOTAL_PERMUTATIONS 1000000 
+#define TOTAL_PERMUTATIONS 10000000000
 // #define TOTAL_PERMUTATIONS 10
 #define CHECK_DONE_PERMUTATIONS 1000000
 
 using namespace nvcuda;
 using namespace std;
 
-__global__ void bogo_sort_matv1(int* data, int size, int* output) {
-    // extern __device__ int done;
+__global__ void bogo_sort_matv1(int* data, int size, int* output, int* block_permutation_counts) {
+
+    __align__(256) extern __shared__ __half permutation_matrix[PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024 * 2]; // two 32x32 arrays
+    __align__(256) extern __shared__ __half permutation_vectors[PERMUTATION_VECTORS_32x16_FLAT_LENGTH_512];
+    extern __shared__ int temp_permutation[PERMUTATION_LENGTH];
+
+    extern __device__ int done;
     extern __shared__ int local_done;
     extern __shared__ bool is_sorted;
 
     if (threadIdx.x == 0) {
         local_done = 0;
         is_sorted = false;
-        // if (blockIdx.x == 0) {
-        //     done = 0;
-        // }
+        if (blockIdx.x == 0) {
+            done = 0;
+        }
     }
+
     __syncthreads();
-
-    extern __shared__ __half permutation_matrix[PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024 * 2]; // two 32x32 arrays
-    extern __shared__ __half permutation_vectors[PERMUTATION_VECTORS_32x16_FLAT_LENGTH_512];
-    extern __shared__ int temp_permutation[PERMUTATION_LENGTH];
-
     #ifdef DEBUG_PERMUTE
     for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
         data[i * PERMUTATION_LENGTH + threadIdx.x] = __float2half(threadIdx.x);
@@ -58,10 +60,11 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     // Initialize random states and generate random ints
     extern __shared__ curandStatePhilox4_32_10_t random_states[PERMUTATION_LENGTH];
     extern __shared__ int random_ints[PERMUTATION_LENGTH];
+
     //curand_init(unsigned long long seed,
-    // unsigned long long subsequence,
-    // unsigned long long offset,
-    // curandStatePhilox4_32_10_t *state)   
+    //  unsigned long long subsequence,
+    //  unsigned long long offset,
+    //  curandStatePhilox4_32_10_t *state)   
     curand_init(blockIdx.x, threadIdx.x, 0, &random_states[threadIdx.x]);
     __syncthreads();
     
@@ -113,6 +116,38 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     }
     __syncthreads();
 
+    //we want to use wmma's native 16x16x16 matmul accumulate operations,
+    //so each of our fragments needs to be 16x16x16
+    //
+    //we break down each 32x32 matrices into 16x16 tiles
+    /*
+                    32x32 Matrix Memory Layout
+    
+    +-------------------+-------------------+
+    | ⬡                 | ⬢        ↑        |
+    |<- NEXT_BLOCK=16 ->|          |        |
+    |                   |  LOWER_ROW=16*32  |
+    |                   |          |        |
+    |                   |          ↓        |
+    +-------------------+-------------------+
+    | ⬣                 | ⬤                |
+    |                   |                   |
+    |                   |                   |
+    |                   |                   |
+    +-------------------+--------------------+
+
+    Memory addresses for each quadrant:
+    
+    ⬡ ←── permutation_matrix
+    ⬢ ←── permutation_matrix + NEXT_BLOCK
+    ⬣ ←── permutation_matrix + LOWER_ROW  
+    ⬤ ←── permutation_matrix + LOWER_ROW + NEXT_BLOCK
+
+    Each 16x16 quadrant maps to tensor core fragments:
+    ⬡ → mat_nw_frag     ⬢ → mat_ne_frag
+    ⬣ → mat_sw_frag     ⬤ → mat_se_frag
+    */
+
     wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_ne_frag;
     wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_nw_frag;
     wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_se_frag;
@@ -129,80 +164,24 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_up_frag;
     wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_down_frag;
 
-    if (threadIdx.x == 0) {
-        printf("Reached tensor core initialization. Starting with %ld permutations tried.\n", permutations_tried);
-    }
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        printf("Loading permutation vector fragments...\n");
-        printf("Loading upper permutation vector fragment...\n");
-        printf("  - Fragment type: matrix_b (input matrix B)\n");
-        printf("  - Matrix layout: column-major\n");
-        printf("  - Fragment dimensions: %dx%dx%d (MxNxK)\n", OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT);
-        printf("  - Data type: half precision (FP16)\n");
-        printf("  - Source: permutation_vectors array\n");
-        printf("  - Leading dimension: %d\n", PERMUTATION_LENGTH);
-        printf("  - Loading %d elements starting at index 0\n", PERMUTATION_LENGTH);
-        printf("\nPermutation vectors at load point:\n");
-        printf("Upper vector (first 16 elements):\n");
-        for (int i = 0; i < 16; i++) {
-            printf("%.1f ", __half2float(permutation_vectors[i]));
-            if ((i + 1) % 8 == 0) printf("\n");
-        }
-        printf("\nLower vector (first 16 elements):\n"); 
-        for (int i = 0; i < 16; i++) {
-            printf("%.1f ", __half2float(permutation_vectors[i + NEXT_BLOCK]));
-            if ((i + 1) % 8 == 0) printf("\n");
-        }
-
-        printf("\nFragment contents after loading:\n");
-        printf("vec_up_frag elements:\n");
-        for (int i = 0; i < vec_up_frag.num_elements; i++) {
-            printf("%.1f ", __half2float(vec_up_frag.x[i]));
-            if ((i + 1) % 8 == 0) printf("\n");
-        }
-        printf("\nvec_down_frag elements:\n");
-        for (int i = 0; i < vec_down_frag.num_elements; i++) {
-            printf("%.1f ", __half2float(vec_down_frag.x[i]));
-            if ((i + 1) % 8 == 0) printf("\n");
-        }
-
-    }
     wmma::load_matrix_sync(vec_up_frag, permutation_vectors, PERMUTATION_LENGTH);
-    if (threadIdx.x == 0) {
-        printf("Loading lower permutation vector fragment...\n");
-    }
     wmma::load_matrix_sync(vec_down_frag, permutation_vectors + NEXT_BLOCK, PERMUTATION_LENGTH);
 
-    if (threadIdx.x == 0) {
-        printf("Loading primary permutation matrix fragments...\n"); 
-    }
     wmma::load_matrix_sync(mat_nw_frag, permutation_matrix, PERMUTATION_LENGTH);
     wmma::load_matrix_sync(mat_ne_frag, permutation_matrix + NEXT_BLOCK, PERMUTATION_LENGTH);
     wmma::load_matrix_sync(mat_sw_frag, permutation_matrix + LOWER_ROW, PERMUTATION_LENGTH);
     wmma::load_matrix_sync(mat_se_frag, permutation_matrix + LOWER_ROW + NEXT_BLOCK, PERMUTATION_LENGTH);
 
-    if (threadIdx.x == 0) {
-        printf("Loading alternate permutation matrix fragments...\n");
-    }
     wmma::load_matrix_sync(mat_nw_alt_frag, permutation_matrix + PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024, PERMUTATION_LENGTH);
     wmma::load_matrix_sync(mat_ne_alt_frag, permutation_matrix + NEXT_BLOCK + PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024, PERMUTATION_LENGTH);
     wmma::load_matrix_sync(mat_sw_alt_frag, permutation_matrix + LOWER_ROW + PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024, PERMUTATION_LENGTH);
     wmma::load_matrix_sync(mat_se_alt_frag, permutation_matrix + LOWER_ROW + NEXT_BLOCK + PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024, PERMUTATION_LENGTH);
-    if (threadIdx.x == 0) {
-        printf("Reached tensor core loading. Loaded all matrix fragments for permutation generation.\n");
-    }
     __syncthreads();
 
     while (permutations_tried < TOTAL_PERMUTATIONS) {
-        if (threadIdx.x == 0) {
-            printf("Reached permutation %ld\n", permutations_tried);
-        }
-        // get 16th bit of switch_indexer
-        bool random_bit = (switch_indexer >> 16) & 1;
-
         #ifdef DEBUG_RANDOM
         if (threadIdx.x == 0) {
+            printf("Reached permutation %ld\n", permutations_tried);
             printf("switch_indexer:     ");
             for (int i = 31; i >= 0; i--) {
                 printf("%d", (switch_indexer >> i) & 1);
@@ -222,7 +201,8 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
         }
         #endif
 
-        if (random_bit) {
+            //get 16th-ish bit of switch_indexer, should be random bit
+        if ((switch_indexer >> 16) & 1) {
             wmma::fill_fragment(prod_up_frag, 0.0f);
             wmma::mma_sync(prod_up_frag, mat_nw_frag, vec_up_frag, prod_up_frag);
             wmma::mma_sync(prod_up_frag, mat_ne_frag, vec_down_frag, prod_up_frag);
@@ -248,45 +228,58 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
         wmma::load_matrix_sync(vec_down_frag, permutation_vectors + NEXT_BLOCK, PERMUTATION_LENGTH);
 
         if (threadIdx.x == 0) {
+            // these operations are weird because they are intended to
+            //      1) generate a mostly random new bit
+            //      2) in as few clock cycles + hits to shared memory as possible
+            // can definitely be improved
             // shift all bits in incrementer left by 1
             switch_incrementer = (switch_incrementer << 1) | (switch_incrementer >> 31);
+            // do weird fucky-wucky operation to generate a psuedorandom new switch_indexer
             switch_indexer = switch_indexer * switch_multiplier + switch_incrementer;
             permutations_tried++;
-            // printf("Reached switch update at permutation %d with indexer=0x%08x, incrementer=0x%08x, multiplier=0x%08x\n", 
-            //        permutations_tried, switch_indexer, switch_incrementer, switch_multiplier);
-            // printf("indexer: ");
-            // for (int i = 31; i >= 0; i--) {
-            //     printf("%d", (switch_indexer >> i) & 1);
-            //     if (i % 8 == 0) printf(" ");
-            // }
-            // printf("\n");
+            #ifdef DEBUG_RANDOM
+            printf("Reached switch update at permutation %d with indexer=0x%08x, incrementer=0x%08x, multiplier=0x%08x\n", 
+                   permutations_tried, switch_indexer, switch_incrementer, switch_multiplier);
+            printf("indexer: ");
+            for (int i = 31; i >= 0; i--) {
+                printf("%d", (switch_indexer >> i) & 1);
+                if (i % 8 == 0) printf(" ");
+            }
+            printf("\n");
+            #endif
         }
 
         __syncthreads();
 
         for (int i = 0; i < 16; i++) {
+            //address of i'th row of permutation_vectors
+            //assuming row major layout, and zero based indexing
             verify_sort_matv1(permutation_vectors + i * 32, 32, &is_sorted);
             if (is_sorted) {
                 output[threadIdx.x] = permutation_vectors[i * 32 + threadIdx.x];
                 if (threadIdx.x == 0) {
-                    printf("Block %d found sorted array after %ld permutations\n", blockIdx.x, permutations_tried);
-                    // atomicCAS(&done, 0, 1);
+                    printf("Block %d found sorted array after %ld iterations and %ld permutations\n", blockIdx.x, permutations_tried, permutations_tried * 16);
+                    atomicCAS(&done, 0, 1);
+                    block_permutation_counts[blockIdx.x] = permutations_tried;
                 }
                 return;
             }
         }
 
-        if (permutations_tried % CHECK_DONE_PERMUTATIONS == 0) {
+        if (permutations_tried % CHECK_DONE_PERMUTATIONS == 1) {
             if (threadIdx.x == 0) {
-                // local_done = atomicAnd(&done, 1);
+                local_done = atomicAnd(&done, 1);
             }
             __syncthreads();
-            // if (local_done) {
-            //     if (blockIdx.x%100 ==0 && threadIdx.x == 0) {
-            //         printf("Block %d: Permutations tried: %d\n", blockIdx.x, permutations_tried);
-            //     }
-            //     return;
-            // }
+            if (local_done) {
+                if (blockIdx.x%1000 == 0 && threadIdx.x == 0) {
+                    printf("Block %d: Loops: %ld; Permutations tried: %ld\n", blockIdx.x, permutations_tried, permutations_tried * 16);
+                }
+                if (threadIdx.x == 0) {
+                    block_permutation_counts[blockIdx.x] = permutations_tried;
+                }
+                return;
+            }
         }
     }
 
@@ -646,9 +639,7 @@ float KernelManagerBogoSortMatV1::launchKernel(int* data, int* output) {
     #endif
 
     int numBlocks = smCount * 64;
-    #ifdef DEBUG_PRINT
     printf("Number of blocks: %d\n", numBlocks);
-    #endif
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -664,10 +655,13 @@ float KernelManagerBogoSortMatV1::launchKernel(int* data, int* output) {
     // Record start time
     cudaEventRecord(start);
 
-    // Launch kernel
-    // bogo_sort_matv1<<<grid, block>>>(data, size, output);
-    bogo_sort_matv1<<<1, block>>>(data, size, output);
+    // Allocate device memory for block permutation counts
+    int* block_permutation_counts;
+    cudaMalloc(&block_permutation_counts, grid.x * sizeof(int));
 
+    // Launch kernel
+    bogo_sort_matv1<<<grid, block>>>(data, size, output, block_permutation_counts);
+    // bogo_sort_matv1<<<1, block>>>(data, size, output);
     // Record stop time
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -677,6 +671,40 @@ float KernelManagerBogoSortMatV1::launchKernel(int* data, int* output) {
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
+
+    // Copy block permutation counts back to host and print
+    int* h_block_permutation_counts = new int[grid.x];
+    cudaMemcpy(h_block_permutation_counts, block_permutation_counts, grid.x * sizeof(int), cudaMemcpyDeviceToHost);
+
+    printf("\nBlock permutation counts:\n");
+    for (int i = 0; i < grid.x; i=i+1000) {
+        if (h_block_permutation_counts[i] > 0) {
+            printf("Block %d: %d permutations\n", i, h_block_permutation_counts[i]);
+        }
+    }
+
+    // Calculate and print total permutations across all blocks
+    long total_block_permutations = 0;
+    for (int i = 0; i < grid.x; i++) {
+        total_block_permutations += h_block_permutation_counts[i];
+    }
+    printf("\nTotal block cycles computed: %'ld\n", total_block_permutations);
+
+    // Each block permutation generates 16 actual permutations
+    long total_permutations = total_block_permutations * 16;
+    printf("Total actual permutations tried: %'ld\n", total_permutations);
+
+    // Calculate FLOPS:
+    // For each permutation:
+    // - 16x16 matrix multiplied by 16x1 vector requires:
+    //   16 rows * 16 columns * 2 operations (multiply + add) = 512 FLOPs per permutation
+    double total_tflops = (total_permutations * 512.0) / 1e12;
+    printf("Total TFLOPs performed: %.2f teraflops\n", total_tflops);
+
+    // Cleanup
+    delete[] h_block_permutation_counts;
+    cudaFree(block_permutation_counts);
+
 
     return milliseconds;
 }

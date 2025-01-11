@@ -16,6 +16,20 @@ check_status() {
     fi
 }
 
+# Parse command line arguments
+DEBUG_MODE=0
+while [ $# -gt 0 ]; do
+    case $1 in
+        --debug)
+            DEBUG_MODE=1
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
 echo -e "${YELLOW}Starting rebuild process...${NC}"
 
 # If we're in the build directory, go up one level
@@ -36,7 +50,13 @@ check_status "Created fresh build directory"
 # Navigate to build directory and run cmake
 cd build
 echo -e "${YELLOW}Running CMake...${NC}"
-cmake ..
+
+# Apply debug flags if in debug mode
+if [ $DEBUG_MODE -eq 1 ]; then
+    cmake -DCMAKE_CUDA_FLAGS="${CMAKE_CUDA_FLAGS} -g -G" ..
+else
+    cmake ..
+fi
 check_status "CMake configuration"
 
 # Build the project
