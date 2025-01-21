@@ -2,7 +2,8 @@
 #include <stdio.h>
 // #include "../src/kernels/basic_kernel.cuh"
 // #include "../src/kernels/bogo_sort.cuh"
-#include "../src/kernels/bogo_sort_matv1.cuh"
+// #include "../src/kernels/bogo_sort_matv1.cuh"
+#include "../src/kernels/bogo_sort_matv2.cuh"
 
 #define COMPILE_ALL false
 
@@ -231,7 +232,6 @@ bool test_bogo_sort_3_symbol() {
     return success;
 
 }
-#endif
 
 bool test_bogo_sort_matv1_3_symbol() {
     int N = 32;
@@ -334,7 +334,110 @@ bool test_bogo_sort_matv1_3_symbol() {
     return success;
 
 }
+#endif
+
+bool test_bogo_sort_matv2_3_symbol() {
+    int N = 32;
+    size_t size = N * sizeof(int);
+
+    // Allocate and initialize host memory
+    int *h_input = new int[N];
+    int *h_output = new int[N];
+
+    int num_zeroes = 16;
+    int num_twos = 1;
+    
+    // Initialize input array
+    // First fill with zeroes
+    for (int i = 0; i < 32; i++) {
+        h_input[i] = 0;
+        h_output[i] = 0;
+    }
+
+    // Randomly scatter num_zeroes 1's throughout
+    int ones_placed = 0;
+    while (ones_placed + num_twos < num_zeroes) {
+        int pos = rand() % 32 - num_twos;
+        if (h_input[pos] == 0) {
+            h_input[pos] = 1;
+            ones_placed++;
+        }
+    }
+
+    for (int i = N - num_twos; i < N; i++) {
+        h_input[i] = 2;
+    }
+
+    // Print input array
+    printf("Input array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", h_input[i]);
+    }
+    printf("\n");
+
+    // Expected output array
+    int expected[32];
+    for (int i = 0; i < 32; i++) {
+        // expected[i] = (i < num_zeroes) ? 0 : 1;
+        
+        expected[i] = (i < 32 - num_zeroes) ? 0 : 1;
+    }
+
+    for (int i = N - num_twos; i < N; i++) {
+        expected[i] = 2;
+    }
+
+    // Print expected array
+    printf("Expected array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", expected[i]);
+    }
+    printf("\n");
+
+    // Allocate device memory
+    int *d_input, *d_output;
+    cudaMalloc(&d_input, size);
+    cudaMalloc(&d_output, size);
+
+    // Copy input to device
+    cudaMemcpy(d_input, h_input, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_output, h_output, size, cudaMemcpyHostToDevice);
+
+    // Run kernel
+    KernelManagerBogoSortMatV2::launchKernel(d_input, d_output);
+
+    cudaError_t err = cudaGetLastError();        // Get error code
+    printf("CUDA Error: %s\n", cudaGetErrorString(err));
+
+    // Copy result back to host
+    cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost);
+
+    // Print output array
+    printf("Output array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", h_output[i]); 
+    }
+    printf("\n");
+
+    // Verify output matches expected array
+    bool success = true;
+    for (int i = 0; i < N; i++) {
+        if (h_output[i] != expected[i]) {
+            success = false;
+            break;
+        }
+    }
+
+    // Cleanup
+    delete[] h_input;
+    delete[] h_output;
+    cudaFree(d_input);
+    cudaFree(d_output);
+
+    return success;
+
+}
 int main() {
-    RUN_TEST(test_bogo_sort_matv1_3_symbol);
+    RUN_TEST(test_bogo_sort_matv2_3_symbol);
     return 0;
 }
