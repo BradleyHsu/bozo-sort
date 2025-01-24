@@ -133,21 +133,24 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
     register long load_addr_2 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN;
     register long load_addr_3 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT;
 
-    __align__(256) extern __shared__ uint8_t output_vector[128];
+    // __align__(256) extern __shared__ uint8_t output_vector[128];
+    // register uint8_t* output_vector_ptr = output_vector;
+    uint32_t output_1;
+    unsigned output_2;
+    unsigned output_3;
+    unsigned output_4;
      
     if (threadIdx.x == 0) {
         asm volatile (".reg     .v4.b32 vec;\n"
-                    "ld.shared.u32 vec.x, [%1];\n"
-                    "ld.shared.u32 vec.y, [%2];\n"
-                    "ld.shared.u32 vec.z, [%3];\n"
-                    "ld.shared.u32 vec.w, [%4];\n"
-                    "st.shared.v4.u32 [%0], vec;\n"
-                    : "+l"(output_vector)
-                    : "l"(load_addr_0),  "l"(load_addr_1), "l"(load_addr_2), "l"(load_addr_3));
+                    "ld.shared.b32 vec.x, [%1];\n"
+                    // "ld.shared.b32 vec.y, [%2];\n"
+                    // "ld.shared.b32 vec.z, [%3];\n"
+                    // "ld.shared.b32 vec.w, [%4];\n"
+                    "st.shared.u32 %0, vec.x;\n"
+                    : "=r"(output_1) 
+                    : "l"(load_addr_0)/*,  "l"(load_addr_1), "l"(load_addr_2), "l"(load_addr_3)*/);
         printf("Output vector: ");
-        for (int i = 0; i < 128; i++) {
-            printf("%d ", output_vector[i]);
-        }
+        printf("%u", output_1);
         printf("\n");
     }
 
