@@ -128,29 +128,55 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
         permutation_vectors[offset + global_idx] = __float2half(val);
     }
     __syncthreads();
-    register long load_addr_0 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x;
-    register long load_addr_1 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_RIGHT;
-    register long load_addr_2 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN;
-    register long load_addr_3 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT;
-
-    // __align__(256) extern __shared__ uint8_t output_vector[128];
-    // register uint8_t* output_vector_ptr = output_vector;
-    uint32_t output_1;
-    unsigned output_2;
-    unsigned output_3;
-    unsigned output_4;
-     
     if (threadIdx.x == 0) {
-        asm volatile (".reg     .v4.b32 vec;\n"
-                    "ld.shared.b32 vec.x, [%1];\n"
-                    // "ld.shared.b32 vec.y, [%2];\n"
-                    // "ld.shared.b32 vec.z, [%3];\n"
-                    // "ld.shared.b32 vec.w, [%4];\n"
-                    "st.shared.u32 %0, vec.x;\n"
-                    : "=r"(output_1) 
-                    : "l"(load_addr_0)/*,  "l"(load_addr_1), "l"(load_addr_2), "l"(load_addr_3)*/);
+        long load_addr_0 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * threadIdx.x);
+        long load_addr_1 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_RIGHT;
+        long load_addr_2 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN;
+        long load_addr_3 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT;
+
+        __align__(256) extern __shared__ uint8_t output_vector_alloc[128];
+        long output_vector = __cvta_generic_to_shared(output_vector_alloc);
+        output_vector_alloc[0] = 0;
+        output_vector_alloc[1] = 0;
+        output_vector_alloc[2] = 0;
+        output_vector_alloc[3] = 0;
+
+        // register uint8_t* output_vector_ptr = output_vector;
+        // __align__(256) extern __shared__ uint32_t output_1;
+        // extern __shared__ uint32_t output_1;
+        // output_1 = 2;
+        unsigned output_2;
+        unsigned output_3;
+        unsigned output_4;
+
+        // uint32_t* output_1_addr = &output_1;
+        printf("output_1_addr: %p\n", (void*) output_vector_alloc);
+     
+    
+        asm volatile (
+                    ".reg     .v4.b32 vec;\n"
+                    ".reg     .b32 r1;\n"
+
+                    "ld.shared.b32 r1, [%0];\n"
+                    "mov.b32 vec.y, 0;\n"           // Initialize vec.y
+                    "mov.b32 vec.z, 0;\n"           // Initialize vec.z
+                    "mov.b32 vec.w, 0;\n"           // Initialize vec.w
+                    // "st.shared.v4.b32 [%1], vec;\n"
+                    "mov.b32 r1, vec.x;\n"
+                    "st.shared.b32 [%1], r1;\n"
+                    "mov.b32 r1, vec.y;\n"
+                    "st.shared.b32 [%1+4], r1;\n"
+                    "mov.b32 r1, vec.z;\n"
+                    "st.shared.b32 [%1+8], r1;\n"
+                    "mov.b32 r1, vec.w;\n"
+                    "st.shared.b32 [%1+12], r1;\n"
+                    :
+                    : "l"(load_addr_0), "l"(output_vector)/*,  "l"(load_addr_1), "l"(load_addr_2), "l"(load_addr_3)*/
+                    : "memory");
         printf("Output vector: ");
-        printf("%u", output_1);
+        for (int i = 0; i < 4; i++) {
+            printf("%08x ", output_vector_alloc[i]);
+        }
         printf("\n");
     }
 
