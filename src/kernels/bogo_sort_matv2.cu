@@ -24,11 +24,11 @@
 #define INNER_DIM 16
 #define OUTER_HEIGHT 16
 
-#define ROW_LENGTH 32
+// in terms of 32-bit words
+#define ROW_LENGTH 8
 #define CORE_MATRIX_HEIGHT 16
-#define WORD_BYTES 4
-#define SHIFT_RIGHT 16
-#define SHIFT_DOWN 128
+#define SHIFT_RIGHT 4
+#define SHIFT_DOWN 32
 
 // #define TOTAL_PERMUTATIONS 1000000 
 #define TOTAL_PERMUTATIONS 10000000000
@@ -126,56 +126,46 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
     // const int SHIFT_DOWN = 128;
 
     int warp_id = threadIdx.x/ROW_LENGTH;
+    // int warp_id = dummy_thread_idx/ROW_LENGTH;
     int warp_address = warp_id * ROW_LENGTH * CORE_MATRIX_HEIGHT;
     // Fill permutation_vectors with sequential values 0 to 64*32-1
     int global_idx = warp_id * ROW_LENGTH + (threadIdx.x % ROW_LENGTH);
+    // int global_idx = warp_id * ROW_LENGTH + (dummy_thread_idx % ROW_LENGTH);
     for (int i = 0; i < CORE_MATRIX_HEIGHT * 2; i++) {
         int offset = i * ROW_LENGTH;
         int val = (offset + global_idx) % 256;
         permutation_vectors[offset + global_idx] = __float2half(val);
     }
     __syncthreads();
-    if (threadIdx.x == 0) {
+    if (threadIdx.x == 2) {
         // register long load_addr_0 = (long) __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * threadIdx.x);
-        register long load_addr_0 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x;
-        register long load_addr_1 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_RIGHT;
-        register long load_addr_2 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN;
-        register long load_addr_3 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT;
+        // register long load_addr_0 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x;
+        // register long load_addr_1 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_RIGHT;
+        // register long load_addr_2 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN;
+        // register long load_addr_3 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT;
 
-        printf("load_addr_0 contents (u8): ");
-        for (int i = 0; i < 4; i++) {
-            printf("%u ", ((uint8_t*)load_addr_0)[i]);
-        }
-        printf("\n");
+        // register uint8_t* load_addr_0 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx;
+        // register uint8_t* load_addr_1 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_RIGHT;
+        // register uint8_t* load_addr_2 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN;
+        // register uint8_t* load_addr_3 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN + SHIFT_RIGHT;
 
-        printf("load_addr_1 contents (u8): ");
-        for (int i = 0; i < 4; i++) {
-            printf("%u ", ((uint8_t*)load_addr_1)[i]);
-        }
-        printf("\n");
+        // typecast permutation vectors in terms of 32 bit words to ensure loads can be done
+        uint32_t* permutation_vectors_32_bit = (uint32_t *) permutation_vectors;
+        register uint32_t bitf_0 = permutation_vectors_32_bit[warp_address + threadIdx.x];
+        register uint32_t bitf_1 = permutation_vectors_32_bit[warp_address + threadIdx.x + SHIFT_RIGHT];
+        register uint32_t bitf_2 = permutation_vectors_32_bit[warp_address + threadIdx.x + SHIFT_DOWN];
+        register uint32_t bitf_3 = permutation_vectors_32_bit[warp_address + threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT];
 
-        printf("load_addr_2 contents (u8): ");
-        for (int i = 0; i < 4; i++) {
-            printf("%u ", ((uint8_t*)load_addr_2)[i]);
-        }
-        printf("\n");
+        // register long load_addr_0 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx);
+        // register long load_addr_1 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_RIGHT);
+        // register long load_addr_2 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN);
+        // register long load_addr_3 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN + SHIFT_RIGHT);
 
-        printf("load_addr_3 contents (u8): ");
-        for (int i = 0; i < 4; i++) {
-            printf("%u ", ((uint8_t*)load_addr_3)[i]);
-        }
-        printf("\n");
-
-        // printf("warp_address: %d\n", warp_address);
-        // printf("WORD_BYTES: %d\n", WORD_BYTES);
-        // printf("SHIFT_RIGHT: %d\n", SHIFT_RIGHT);
-        // printf("SHIFT_DOWN: %d\n", SHIFT_DOWN);
-        // printf("load_addr_0: %p\n", (void*) load_addr_0);
-
+        printf("bitf_0: 0x%08x\n", bitf_0);
+        printf("bitf_1: 0x%08x\n", bitf_1); 
+        printf("bitf_2: 0x%08x\n", bitf_2);
+        printf("bitf_3: 0x%08x\n", bitf_3);
         
-        // long load_addr_1 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_RIGHT;
-        // long load_addr_2 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN;
-        // long load_addr_3 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT;
 
         __align__(256) extern __shared__ uint8_t output_vector_alloc[128];
         long output_vector = __cvta_generic_to_shared(output_vector_alloc);
@@ -186,15 +176,7 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
         output_vector_alloc[2] = 0;
         output_vector_alloc[3] = 0;
 
-        // register uint8_t* output_vector_ptr = output_vector;
-        // __align__(256) extern __shared__ uint32_t output_1;
-        // extern __shared__ uint32_t output_1;
-        // output_1 = 2;
-        // unsigned output_2;
-        // unsigned output_3;
-        // unsigned output_4;
-
-        // uint32_t* output_1_addr = &output_1;
+       
         printf("output_1_addr: %p\n", (void*) output_vector_alloc);
      
     
@@ -202,10 +184,21 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
                     ".reg     .v4.b32 vec;\n"
                     ".reg     .b32 r1;\n"
 
-                    "ld.b32 vec.x, [%1];\n"
-                    "ld.b32 vec.y, [%2];\n"
-                    "ld.b32 vec.z, [%3];\n"
-                    "ld.b32 vec.w, [%4];\n"
+                    // "ld.b32 vec.x, [%1];\n"
+                    // "ld.b32 vec.y, [%2];\n"
+                    // "ld.b32 vec.z, [%3];\n"
+                    // "ld.b32 vec.w, [%4];\n"
+
+                    "mov.b32 vec.x, %1;\n"
+                    "mov.b32 vec.y, %2;\n"
+                    "mov.b32 vec.z, %3;\n"
+                    "mov.b32 vec.w, %4;\n"
+
+                    // "ld.shared.b32 vec.x, [%1];\n"
+                    // "ld.shared.b32 vec.y, [%2];\n"
+                    // "ld.shared.b32 vec.z, [%3];\n"
+                    // "ld.shared.b32 vec.w, [%4];\n"
+
                     // "ld.v4.b32 vec, [%0];\n"
                     "st.shared.v4.b32 [%0], vec;\n"
                     // "mov.b32 vec.x, 1;\n"
@@ -217,7 +210,7 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
                     // "mov.b32 r1, vec.w;\n"
                     // "st.shared.b32 [%1+12], r1;\n"
                     :
-                    :"l"(output_vector_alloc), "l"(load_addr_0),  "l"(load_addr_1), "l"(load_addr_2), "l"(load_addr_3)
+                    :"l"(output_vector_alloc), "r"(bitf_0), "r"(bitf_1), "r"(bitf_2), "r"(bitf_3)
                     : "memory");
         printf("Output vector: ");
         printf("Decimal: ");
