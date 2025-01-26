@@ -138,17 +138,6 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
     }
     __syncthreads();
     if (threadIdx.x == 2) {
-        // register long load_addr_0 = (long) __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * threadIdx.x);
-        // register long load_addr_0 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x;
-        // register long load_addr_1 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_RIGHT;
-        // register long load_addr_2 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN;
-        // register long load_addr_3 = (long) permutation_vectors + warp_address + WORD_BYTES * threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT;
-
-        // register uint8_t* load_addr_0 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx;
-        // register uint8_t* load_addr_1 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_RIGHT;
-        // register uint8_t* load_addr_2 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN;
-        // register uint8_t* load_addr_3 = permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN + SHIFT_RIGHT;
-
         // typecast permutation vectors in terms of 32 bit words to ensure loads can be done
         uint32_t* permutation_vectors_32_bit = (uint32_t *) permutation_vectors;
         register uint32_t bitf_0 = permutation_vectors_32_bit[warp_address + threadIdx.x];
@@ -156,15 +145,10 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
         register uint32_t bitf_2 = permutation_vectors_32_bit[warp_address + threadIdx.x + SHIFT_DOWN];
         register uint32_t bitf_3 = permutation_vectors_32_bit[warp_address + threadIdx.x + SHIFT_DOWN + SHIFT_RIGHT];
 
-        // register long load_addr_0 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx);
-        // register long load_addr_1 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_RIGHT);
-        // register long load_addr_2 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN);
-        // register long load_addr_3 = __cvta_generic_to_shared(permutation_vectors + warp_address + WORD_BYTES * dummy_thread_idx + SHIFT_DOWN + SHIFT_RIGHT);
-
-        printf("bitf_0: 0x%08x\n", bitf_0);
-        printf("bitf_1: 0x%08x\n", bitf_1); 
-        printf("bitf_2: 0x%08x\n", bitf_2);
-        printf("bitf_3: 0x%08x\n", bitf_3);
+        // printf("bitf_0: 0x%08x\n", bitf_0);
+        // printf("bitf_1: 0x%08x\n", bitf_1); 
+        // printf("bitf_2: 0x%08x\n", bitf_2);
+        // printf("bitf_3: 0x%08x\n", bitf_3);
         
 
         __align__(256) extern __shared__ uint8_t output_vector_alloc[128];
@@ -178,37 +162,21 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
 
        
         printf("output_1_addr: %p\n", (void*) output_vector_alloc);
-     
+
+        uint64_t permutation_matrix_start_address = (uint64_t) permutation_matrix;
+        printf("permutation_matrix_start_address: %p\n", (void*)permutation_matrix_start_address);
+
     
         asm volatile (
                     ".reg     .v4.b32 vec;\n"
                     ".reg     .b32 r1;\n"
-
-                    // "ld.b32 vec.x, [%1];\n"
-                    // "ld.b32 vec.y, [%2];\n"
-                    // "ld.b32 vec.z, [%3];\n"
-                    // "ld.b32 vec.w, [%4];\n"
 
                     "mov.b32 vec.x, %1;\n"
                     "mov.b32 vec.y, %2;\n"
                     "mov.b32 vec.z, %3;\n"
                     "mov.b32 vec.w, %4;\n"
 
-                    // "ld.shared.b32 vec.x, [%1];\n"
-                    // "ld.shared.b32 vec.y, [%2];\n"
-                    // "ld.shared.b32 vec.z, [%3];\n"
-                    // "ld.shared.b32 vec.w, [%4];\n"
-
-                    // "ld.v4.b32 vec, [%0];\n"
                     "st.shared.v4.b32 [%0], vec;\n"
-                    // "mov.b32 vec.x, 1;\n"
-                    // "st.shared.b32 [%1], vec.x;\n"
-                    // "mov.b32 r1, vec.y;\n"
-                    // "st.shared.b32 [%1+4], r1;\n"
-                    // "mov.b32 r1, vec.z;\n"
-                    // "st.shared.b32 [%1+8], r1;\n"
-                    // "mov.b32 r1, vec.w;\n"
-                    // "st.shared.b32 [%1+12], r1;\n"
                     :
                     :"l"(output_vector_alloc), "r"(bitf_0), "r"(bitf_1), "r"(bitf_2), "r"(bitf_3)
                     : "memory");
@@ -425,6 +393,10 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
 
     return;
 }
+
+__device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) { return (((x) & 0x3FFFF) >> 0x4); }
+
+
 
 __device__ void verify_sort_matv2(uint8_t* input, int size, bool* is_sorted) {
     __syncthreads();
