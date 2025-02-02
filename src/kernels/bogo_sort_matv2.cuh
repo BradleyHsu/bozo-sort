@@ -8,6 +8,7 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
 __device__ void verify_sort_matv2(uint8_t* input, int size, bool* is_sorted);
 __device__ void bogo_sort_basis_gen(uint8_t* data, int size, int* random_ints);
 __device__ void bogo_sort_permutation_gen(int* data, int size, int* random_ints);
+__device__ static inline uint32_t populate_bitf(uint8_t* array, int address);
 
 // Wrapper class for kernel management and timing
 class KernelManagerBogoSortMatV2 {

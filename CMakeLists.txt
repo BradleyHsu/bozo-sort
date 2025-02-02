@@ -9,6 +9,11 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 # Enable debug symbols and profiling info
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo -keep")
 
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/cutlass/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/cutlass/tools/util/include
+)
+
 # Main executable
 # add_executable(bozo_sort
     # src/kernels/bogo_sort_matv1.cu
