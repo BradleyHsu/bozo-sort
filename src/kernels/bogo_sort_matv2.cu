@@ -236,7 +236,7 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
     #define CORE_MATRIX_ROW_LENGTH 16
     #define CORE_MATRICES_VERTICALLY_PER_WARP 2
     #define SHIFT_RIGHT 16
-    #define SHIFT_DOWN 512
+    #define SHIFT_DOWN 256
     #define WARP_SIZE 32
 
     // // in terms of 32-bit words
@@ -280,14 +280,11 @@ __global__ void bogo_sort_matv2(int* data, int size, int* output, int* block_per
     // }
     // __syncthreads();
 
-    if (threadIdx.x == 64) {
+    if (threadIdx.x == 127) {
         printf("In thread register access (thread 127):\n");
             for (int i = 0; i < PERMUTE_MATRIX_HEIGHT; i++) {
                 printf("  Row %2d: ", i);
                 for (int j = 0; j < PERMUTATION_LENGTH; j++) {
-                    if (i * PERMUTATION_LENGTH + j == 1772) {
-                        print("[[1772]]");
-                    }
                     printf("%2x ", permutation_vectors[i * PERMUTATION_LENGTH + j]);
                 }
                 printf("\n");
