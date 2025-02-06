@@ -1,0 +1,24 @@
+-e [1;33mStarting rebuild process...[0m
+-e [1;33mCleaning build directory...[0m
+-e [0;32m✓ Removed old build directory[0m
+-e [0;32m✓ Created fresh build directory[0m
+-e [1;33mRunning CMake...[0m
+-- The CUDA compiler identification is NVIDIA 12.4.131
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting CUDA compiler ABI info
+-- Detecting CUDA compiler ABI info - done
+-- Check for working CUDA compiler: /usr/local/cuda/bin/nvcc - skipped
+-- Detecting CUDA compile features
+-- Detecting CUDA compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/btheshoe/bozo-sort/build
+-e [0;32m✓ CMake configuration[0m
+-e [1;33mBuilding project...[0m
+[ 33%] Building CUDA object CMakeFiles/kernel_tests.dir/tests/kernel_tests.cu.o
+[ 66%] Building CUDA object CMakeFiles/kernel_tests.dir/src/kernels/bogo_sort_matv2.cu.o
